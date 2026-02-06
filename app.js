@@ -247,6 +247,52 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   }
 });
 
+// Update user profile
+app.put('/api/auth/profile', authMiddleware, async (req, res) => {
+  try {
+    const { shopName, ownerName, phone, address } = req.body;
+
+    // Find the user
+    const user = await User.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Update fields if provided
+    if (shopName) user.shopName = shopName;
+    if (ownerName) user.ownerName = ownerName;
+    if (phone) user.phone = phone;
+    if (address) user.address = address;
+
+    // Save updated user
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        shopName: user.shopName,
+        ownerName: user.ownerName,
+        email: user.email,
+        phone: user.phone,
+        address: user.address
+      }
+    });
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating profile',
+      error: error.message
+    });
+  }
+});
+
 // Order Routes (Protected)
 
 // Create new order
