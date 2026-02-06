@@ -10,21 +10,74 @@ const User = require('./models/User');
 const authMiddleware = require('./middleware/auth');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: '*', // We'll restrict this later with your frontend URL
+  origin: '*',
   credentials: true
 }));
 app.use(express.json());
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/orderSystemDB';
+// MongoDB Connection with caching for serverless
+let cachedDb = null;
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('MongoDB connected successfully'))
-  .catch(err => console.error('MongoDB connection error:', err));
+async function connectToDatabase() {
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    console.log('Using cached database connection');
+    return cachedDb;
+  }
+
+  const MONGODB_URI = process.env.MONGODB_URI;
+
+  if (!MONGODB_URI) {
+    throw new Error('MONGODB_URI is not defined in environment variables');
+  }
+
+  console.log('Creating new database connection');
+
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      bufferCommands: false,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+
+    cachedDb = mongoose.connection;
+    console.log('MongoDB connected successfully');
+    return cachedDb;
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+    throw error;
+  }
+}
+
+// Middleware to ensure DB connection before each request
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+
+  res.json({
+    status: 'ok',
+    database: states[dbState],
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Authentication Routes
 
@@ -32,6 +85,11 @@ mongoose.connect(MONGODB_URI)
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { shopName, ownerName, email, password, phone, address } = req.body;
+
+    // Validate JWT_SECRET
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured');
+    }
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -76,6 +134,7 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating account',
@@ -87,10 +146,27 @@ app.post('/api/auth/register', async (req, res) => {
 // Login shopkeeper
 app.post('/api/auth/login', async (req, res) => {
   try {
+    console.log('Login request received:', { email: req.body.email });
+
     const { email, password } = req.body;
+
+    // Validate inputs
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    // Validate JWT_SECRET
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured');
+    }
 
     // Find user
     const user = await User.findOne({ email });
+    console.log('User found:', user ? 'Yes' : 'No');
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -100,6 +176,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Check password
     const isValidPassword = await bcrypt.compare(password, user.password);
+    console.log('Password valid:', isValidPassword);
+
     if (!isValidPassword) {
       return res.status(401).json({
         success: false,
@@ -112,6 +190,7 @@ app.post('/api/auth/login', async (req, res) => {
       expiresIn: '30d'
     });
 
+    console.log('Login successful');
     res.status(200).json({
       success: true,
       message: 'Login successful',
@@ -126,6 +205,7 @@ app.post('/api/auth/login', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Login error:', error.message, error.stack);
     res.status(500).json({
       success: false,
       message: 'Error logging in',
@@ -158,6 +238,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Auth/me error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user info',
@@ -168,17 +249,15 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 
 // Order Routes (Protected)
 
-// Create new order (only for authenticated user)
+// Create new order
 app.post('/api/orders', authMiddleware, async (req, res) => {
   try {
     const { customerName, customerPhone, customerAddress, products } = req.body;
 
-    // Support both single product (old format) and multiple products (new format)
     let productArray;
     if (products && Array.isArray(products)) {
       productArray = products;
     } else if (req.body.product) {
-      // Backward compatibility with old single product format
       productArray = [req.body.product];
     } else {
       return res.status(400).json({
@@ -203,6 +282,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
       data: savedOrder
     });
   } catch (error) {
+    console.error('Create order error:', error);
     res.status(400).json({
       success: false,
       message: 'Error creating order',
@@ -211,7 +291,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all orders for the authenticated user only
+// Get all orders
 app.get('/api/orders', authMiddleware, async (req, res) => {
   try {
     const orders = await Order.find({ userId: req.userId }).sort({ orderTime: -1 });
@@ -221,6 +301,7 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
       data: orders
     });
   } catch (error) {
+    console.error('Get orders error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching orders',
@@ -229,7 +310,7 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
   }
 });
 
-// Search orders for the authenticated user only
+// Search orders
 app.get('/api/orders/search', authMiddleware, async (req, res) => {
   try {
     const { query } = req.query;
@@ -257,6 +338,7 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
       data: orders
     });
   } catch (error) {
+    console.error('Search orders error:', error);
     res.status(500).json({
       success: false,
       message: 'Error searching orders',
@@ -265,10 +347,10 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
   }
 });
 
-// Update order (only if it belongs to the authenticated user)
+// Update order
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
   try {
-    const { customerName, customerPhone, customerAddress, products } = req.body;
+    const { customerName, customerPhone, customerAddress, product } = req.body;
 
     const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
 
@@ -279,12 +361,12 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
       });
     }
 
-    // Update order fields
     if (customerName) order.customerName = customerName;
     if (customerPhone) order.customerPhone = customerPhone;
     if (customerAddress) order.customerAddress = customerAddress;
-    if (products && Array.isArray(products) && products.length > 0) {
-      order.products = products;
+    if (product) {
+      order.product = product;
+      order.products = [product];
     }
 
     const updatedOrder = await order.save();
@@ -295,6 +377,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
       data: updatedOrder
     });
   } catch (error) {
+    console.error('Update order error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating order',
@@ -303,7 +386,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete order (only if it belongs to the authenticated user)
+// Delete order
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
@@ -322,6 +405,7 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
       message: 'Order deleted successfully'
     });
   } catch (error) {
+    console.error('Delete order error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting order',
@@ -330,6 +414,13 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+// Export for Vercel serverless
+module.exports = app;
