@@ -13,7 +13,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: '*', // We'll restrict this later with your frontend URL
+  credentials: true
+}));
 app.use(express.json());
 
 // MongoDB Connection
@@ -135,7 +138,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId).select('-password');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -230,7 +233,7 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
 app.get('/api/orders/search', authMiddleware, async (req, res) => {
   try {
     const { query } = req.query;
-    
+
     if (!query) {
       return res.status(400).json({
         success: false,
@@ -266,9 +269,9 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
   try {
     const { customerName, customerPhone, customerAddress, products } = req.body;
-    
+
     const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
-    
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -304,7 +307,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
-    
+
     if (!order) {
       return res.status(404).json({
         success: false,
