@@ -168,14 +168,28 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 // Create new order (only for authenticated user)
 app.post('/api/orders', authMiddleware, async (req, res) => {
   try {
-    const { customerName, customerPhone, customerAddress, product } = req.body;
+    const { customerName, customerPhone, customerAddress, products } = req.body;
+
+    // Support both single product (old format) and multiple products (new format)
+    let productArray;
+    if (products && Array.isArray(products)) {
+      productArray = products;
+    } else if (req.body.product) {
+      // Backward compatibility with old single product format
+      productArray = [req.body.product];
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Products are required'
+      });
+    }
 
     const newOrder = new Order({
       userId: req.userId,
       customerName,
       customerPhone,
       customerAddress,
-      product,
+      products: productArray,
       orderTime: new Date()
     });
 
@@ -229,7 +243,7 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
       $or: [
         { customerName: { $regex: query, $options: 'i' } },
         { customerPhone: { $regex: query, $options: 'i' } },
-        { product: { $regex: query, $options: 'i' } },
+        { products: { $regex: query, $options: 'i' } },
         { customerAddress: { $regex: query, $options: 'i' } }
       ]
     }).sort({ orderTime: -1 });
@@ -243,6 +257,44 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error searching orders',
+      error: error.message
+    });
+  }
+});
+
+// Update order (only if it belongs to the authenticated user)
+app.put('/api/orders/:id', authMiddleware, async (req, res) => {
+  try {
+    const { customerName, customerPhone, customerAddress, products } = req.body;
+    
+    const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found or you do not have permission to update it'
+      });
+    }
+
+    // Update order fields
+    if (customerName) order.customerName = customerName;
+    if (customerPhone) order.customerPhone = customerPhone;
+    if (customerAddress) order.customerAddress = customerAddress;
+    if (products && Array.isArray(products) && products.length > 0) {
+      order.products = products;
+    }
+
+    const updatedOrder = await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Order updated successfully',
+      data: updatedOrder
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error updating order',
       error: error.message
     });
   }
