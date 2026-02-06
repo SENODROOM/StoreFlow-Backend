@@ -350,7 +350,7 @@ app.get('/api/orders/search', authMiddleware, async (req, res) => {
 // Update order
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
   try {
-    const { customerName, customerPhone, customerAddress, product } = req.body;
+    const { customerName, customerPhone, customerAddress, products } = req.body;
 
     const order = await Order.findOne({ _id: req.params.id, userId: req.userId });
 
@@ -361,12 +361,14 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
       });
     }
 
+    // Update fields
     if (customerName) order.customerName = customerName;
     if (customerPhone) order.customerPhone = customerPhone;
     if (customerAddress) order.customerAddress = customerAddress;
-    if (product) {
-      order.product = product;
-      order.products = [product];
+
+    // Update products array
+    if (products && Array.isArray(products) && products.length > 0) {
+      order.products = products;
     }
 
     const updatedOrder = await order.save();
