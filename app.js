@@ -56,6 +56,7 @@ async function connectToDatabase() {
 app.use(async (req, res, next) => {
   try {
     await connectToDatabase();
+    console.log('DB connection established for request:', req.path);
     next();
   } catch (error) {
     console.error('Database connection failed:', error);
@@ -465,8 +466,15 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 // For local development
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  
+  // Initialize database connection before starting server
+  connectToDatabase().then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  }).catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
   });
 }
 
