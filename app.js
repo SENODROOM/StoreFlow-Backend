@@ -108,12 +108,13 @@ app.post('/api/auth/register', async (req, res) => {
     const newUser = new User({
       shopName,
       ownerName,
+      name: shopName, // Use shopName as name for compatibility
       email,
       password: hashedPassword,
-      phone,
-      address
+      phone: phone || '0000000000', // Default phone if not provided
+      address: address || 'Default Address', // Default address if not provided
+      role: 'shopkeeper' // Default role
     });
-
     await newUser.save();
 
     // Generate JWT token
@@ -129,9 +130,11 @@ app.post('/api/auth/register', async (req, res) => {
         id: newUser._id,
         shopName: newUser.shopName,
         ownerName: newUser.ownerName,
+        name: newUser.name,
         email: newUser.email,
         phone: newUser.phone,
-        address: newUser.address
+        address: newUser.address,
+        role: newUser.role
       }
     });
   } catch (error) {
@@ -200,9 +203,11 @@ app.post('/api/auth/login', async (req, res) => {
         id: user._id,
         shopName: user.shopName,
         ownerName: user.ownerName,
+        name: user.name,
         email: user.email,
         phone: user.phone,
-        address: user.address
+        address: user.address,
+        role: user.role
       }
     });
   } catch (error) {
@@ -233,9 +238,11 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
         id: user._id,
         shopName: user.shopName,
         ownerName: user.ownerName,
+        name: user.name,
         email: user.email,
         phone: user.phone,
-        address: user.address
+        address: user.address,
+        role: user.role
       }
     });
   } catch (error) {
